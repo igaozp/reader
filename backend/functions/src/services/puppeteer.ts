@@ -341,8 +341,12 @@ export class PuppeteerControl extends AsyncService {
             if (!requestUrl.startsWith('http:') && !requestUrl.startsWith('https:') && !requestUrl.startsWith('chrome-extension:') && requestUrl !== 'about:blank') {
                 return req.abort('blockedbyclient', 1000);
             }
-            const tldParsed = tldExtract(requestUrl);
-            domainSet.add(tldParsed.domain);
+            try {
+                const tldParsed = tldExtract(requestUrl);
+                domainSet.add(tldParsed.domain);
+            } catch (err) {
+                return req.abort('blockedbyclient', 1000);
+            }
 
             const parsedUrl = new URL(requestUrl);
 
@@ -619,6 +623,7 @@ if (window.self === window.top) {
                     const pSubFrameSnapshots = this.snapshotChildFrames(page);
                     snapshot = await page.evaluate('giveSnapshot(true)') as PageSnapshot;
                     screenshot = Buffer.from(await page.screenshot());
+                    pageshot = Buffer.from(await page.screenshot({ fullPage: true }));
                     if (snapshot) {
                         snapshot.childFrames = await pSubFrameSnapshots;
                     }

@@ -120,9 +120,12 @@ export class AdaptiveCrawlerHost extends RPCHost {
             failed: {},
         });
 
+        let urls: string[] = [];
         if (useSitemap) {
-            const urls = await this.crawlUrlsFromSitemap(targetUrl, maxPages);
+            urls = await this.crawlUrlsFromSitemap(targetUrl, maxPages);
+        }
 
+        if (urls.length > 0) {
             await AdaptiveCrawlTask.COLLECTION.doc(shortDigest).update({
                 status: AdaptiveCrawlTaskStatus.PROCESSING,
                 statusText: `Processing 0/${urls.length}`,
@@ -141,6 +144,8 @@ export class AdaptiveCrawlerHost extends RPCHost {
 
             await Promise.all(promises);
         } else {
+            meta.useSitemap = false;
+
             await AdaptiveCrawlTask.COLLECTION.doc(shortDigest).update({
                 urls: [targetUrl.toString()],
             });
@@ -357,10 +362,9 @@ export class AdaptiveCrawlerHost extends RPCHost {
 
             const title = json.data.title;
             const description = json.data.description;
-            const rerankQuery = `TITLE: ${title}; DESCRIPTION: ${description}`;
             const links = json.data.links as Record<string, string>;
 
-            const relevantUrls = await this.getRelevantUrls(token, { query: rerankQuery, links });
+            const relevantUrls = await this.getRelevantUrls(token, { title, description, links });
             this.logger.debug(`Total urls: ${Object.keys(links).length}, relevant urls: ${relevantUrls.length}`);
 
             for (const url of relevantUrls) {
@@ -413,9 +417,10 @@ export class AdaptiveCrawlerHost extends RPCHost {
     }
 
     async getRelevantUrls(token: string, {
-        query, links
+        title, description, links
     }: {
-        query: string;
+        title: string;
+        description: string;
         links: Record<string, string>;
     }) {
         const invalidSuffix = [
@@ -428,6 +433,13 @@ export class AdaptiveCrawlerHost extends RPCHost {
         const validLinks = Object.entries(links)
             .map(([title, link]) => link)
             .filter(link => link.startsWith('http') && !invalidSuffix.some(suffix => link.endsWith(suffix)));
+
+        let query = '';
+        if (!description) {
+            query += title;
+        } else  {
+            query += `TITLE: ${title}; DESCRIPTION: ${description}`;
+        }
 
         const data = {
             model: 'jina-reranker-v2-base-multilingual',
@@ -455,7 +467,8 @@ export class AdaptiveCrawlerHost extends RPCHost {
             }[];
         };
 
-        return json.results.filter(r => r.relevance_score > 0.3).map(r => removeURLHash(r.document.text));
+        const highestRelevanceScore = json.results[0]?.relevance_score ?? 0;
+        return json.results.filter(r => r.relevance_score > Math.max(highestRelevanceScore * 0.6, 0.1)).map(r => removeURLHash(r.document.text));
     }
 
     getIndex(user?: JinaEmbeddingsTokenAccount) {
